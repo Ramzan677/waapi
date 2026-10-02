@@ -8,7 +8,6 @@ export default async function handler(req, res) {
     return res.status(200).end();
   }
 
-  // Domain Protocol & Host Detection
   const protocol = req.headers['x-forwarded-proto'] || 'https';
   const host = req.headers.host;
   const baseUrl = `${protocol}://${host}`;
@@ -37,10 +36,10 @@ export default async function handler(req, res) {
       res.setHeader('Cache-Control', 'public, max-age=86400, s-maxage=86400');
 
       if (isDownload) {
-        // Direct Download
+        // Direct Download Header
         res.setHeader('Content-Disposition', 'attachment; filename="whatsapp_profile.jpg"');
       } else {
-        // Inline Display (Browser view)
+        // Inline Display Header (Browser Preview)
         res.setHeader('Content-Disposition', 'inline');
       }
 
@@ -50,15 +49,24 @@ export default async function handler(req, res) {
     }
   }
 
-  // Function to process target URL
-  const processProfile = async (targetUrl) => {
-    const upstreamRes = await fetch('[https://whatsapp-dp.faizankhichi.me/api/profile](https://whatsapp-dp.faizankhichi.me/api/profile)', {
+  // Helper Function: Number Clean up & Upstream Processing
+  const processNumber = async (inputNumber) => {
+    // Sirf digits filter out karein (+ ya spaces remove karne ke liye)
+    const cleanNumber = String(inputNumber).replace(/\D/g, '');
+    
+    if (!cleanNumber) {
+      throw new Error('Invalid phone number provided');
+    }
+
+    const waUrl = `https://wa.me/${cleanNumber}`;
+
+    const upstreamRes = await fetch('https://whatsapp-dp.faizankhichi.me/api/profile', {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
         'x-request-token': '31ca64747f4edb0a308f938f030698e6ce514b9bb54daae07fe2c91e1ea2a695'
       },
-      body: JSON.stringify({ url: targetUrl })
+      body: JSON.stringify({ url: waUrl })
     });
 
     const rawData = await upstreamRes.json();
@@ -66,7 +74,7 @@ export default async function handler(req, res) {
     if (rawData.success && rawData.data) {
       const originalDp = rawData.data.profilePicture;
 
-      // Custom Masked Links
+      // Masked Domain Links
       const viewDpUrl = originalDp 
         ? `${baseUrl}/api/profile?img=${encodeURIComponent(originalDp)}` 
         : null;
@@ -79,9 +87,9 @@ export default async function handler(req, res) {
         success: true,
         data: {
           name: rawData.data.name || "Unknown",
-          number: rawData.data.phone || "",
-          profileDp: viewDpUrl,             // Browser me photo SHOW hogi
-          downloadDpLink: downloadDpUrl     // Browser me DIRECT DOWNLOAD hogi
+          number: rawData.data.phone || `+${cleanNumber}`,
+          profileDp: viewDpUrl,            // Browser me OPEN/PREVIEW hoga
+          downloadDpLink: downloadDpUrl    // Direct DOWNLOAD hoga
         }
       };
     }
@@ -89,26 +97,27 @@ export default async function handler(req, res) {
     return { success: false, error: 'Profile not found or private' };
   };
 
-  // 2. POST METHOD (Standard API Call)
-  if (req.method === 'POST') {
+  // 2. GET METHOD (Direct Browser URL Testing with ?number=...)
+  if (req.method === 'GET' && req.query.number) {
     try {
-      const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
-      if (!body || !body.url) {
-        return res.status(400).json({ success: false, error: 'Target URL is required' });
-      }
-
-      const result = await processProfile(body.url);
+      const result = await processNumber(req.query.number);
       return res.status(200).json(result);
     } catch (err) {
-      return res.status(500).json({ success: false, error: err.message });
+      return res.status(400).json({ success: false, error: err.message });
     }
   }
 
-  // 3. GET METHOD (Browser Testing Support)
-  // Usage in browser: [https://your-app.vercel.app/api/profile?url=https://wa.me/923097508053](https://your-app.vercel.app/api/profile?url=https://wa.me/923097508053)
-  if (req.method === 'GET' && req.query.url) {
+  // 3. POST METHOD (Payload with {"number": "923097508053"})
+  if (req.method === 'POST') {
     try {
-      const result = await processProfile(req.query.url);
+      const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
+      const targetNumber = body?.number || body?.phone;
+
+      if (!targetNumber) {
+        return res.status(400).json({ success: false, error: 'Phone number parameter is required' });
+      }
+
+      const result = await processNumber(targetNumber);
       return res.status(200).json(result);
     } catch (err) {
       return res.status(500).json({ success: false, error: err.message });
